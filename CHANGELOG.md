@@ -3,6 +3,16 @@
 What changed in each version of CC Same. The app shows these notes after it updates, and under
 Settings › Updates.
 
+## Unreleased
+
+### Fixed
+
+- **SSH sessions could reconnect to another account's Claude.** A Code session over SSH leaves
+  Claude running on the host, signed in to the account that started it. CC Same copied the link
+  to that process along with the session, so after a switch another account could pick it up
+  and use the first account's plan. Each account now keeps its own; the conversation still
+  carries over, and the other account starts a process of its own on the host.
+
 ## 0.1.10 - 2026-10-05
 
 ### Added

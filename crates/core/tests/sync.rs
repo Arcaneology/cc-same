@@ -267,6 +267,47 @@ fn account_bound_fields_stay_with_their_account() {
     assert!(e.plan(&e.ctx()).is_empty());
 }
 
+/// A session over SSH leaves Claude running on the host, signed in to the account that started
+/// it. Another account must not reconnect to that process (it would run on the first account's
+/// plan), but the conversation still carries over.
+#[test]
+fn ssh_processes_stay_with_the_account_that_started_them() {
+    let e = Env::new();
+    let x = uid();
+    e.record(
+        A,
+        &x,
+        200_000,
+        json!({
+            "title": "continued in A",
+            "sshConfig": {"sshHost": "user@example.invalid"},
+            "sshRemoteTranscriptPath": "/home/user/.claude/projects/test/transcript.jsonl",
+            "sshRemoteProcessId": "process-A",
+            "sshReattach": {"processId": "process-A", "state": "adoptable"},
+        }),
+    );
+    e.record(
+        B,
+        &x,
+        100_000,
+        json!({
+            "sshRemoteProcessId": "process-B",
+            "sshReattach": {"processId": "process-B", "state": "adoptable"},
+        }),
+    );
+    e.code(C);
+    e.sync();
+    let (a, b, c) = (e.read(A, &x), e.read(B, &x), e.read(C, &x));
+    assert_eq!(b["title"], "continued in A");
+    assert_eq!(b["sshRemoteProcessId"], "process-B");
+    assert_eq!(b["sshReattach"]["processId"], "process-B");
+    assert!(c.get("sshRemoteProcessId").is_none() && c.get("sshReattach").is_none());
+    for k in ["sshConfig", "sshRemoteTranscriptPath", "cliSessionId"] {
+        assert_eq!(c[k], a[k], "{k} should travel");
+    }
+    assert!(e.plan(&e.ctx()).is_empty());
+}
+
 // ---------------------------------------------------------------------------- deletions
 
 #[test]

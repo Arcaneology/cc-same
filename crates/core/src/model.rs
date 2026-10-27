@@ -25,6 +25,8 @@ pub const ACCOUNT_LOCAL_KEYS: &[&str] = &[
     "steeredByRemoteClient",
     "publishedArtifacts", // artifacts belong to the account that published them
     "isStarred",          // pins are star-synced with each account's server settings
+    "sshRemoteProcessId", // Claude left running on an SSH host keeps the sign-in that started it
+    "sshReattach",        // how to reconnect to that process
 ];
 pub const ACCOUNT_LOCAL_PREFIXES: &[&str] = &["remoteControl"];
 

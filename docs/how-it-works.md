@@ -92,6 +92,9 @@ For every session:
     server sessions owned by an account.
   - `publishedArtifacts`.
   - `isStarred`: pins are star-synced with each account's server settings.
+  - `sshRemoteProcessId` and `sshReattach`: a session over SSH leaves Claude running on the host,
+    signed in to the account that started it. Another account starts a process of its own there
+    and carries on from the same transcript (`sshRemoteTranscriptPath` travels).
 
   Each account keeps its own values, and a new copy starts without them. Desktop reads all of
   these with defaults, so absent is safe. `remoteMcpServersConfig` is typically about 97% of a
