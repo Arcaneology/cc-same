@@ -16,6 +16,8 @@ Settings › Updates.
   data to `%LOCALAPPDATA%\Claude-Data`, where CC Same didn't look, so it found no sessions and
   stopped syncing. It looks there now, and in the older folder of either of Desktop's Store
   packages.
+- **Windows: the Settings button didn't open Settings.** Windows took a click on it for the start
+  of dragging the window, so only Ctrl+, worked.
 
 ## 0.1.10 - 2026-10-05
 
