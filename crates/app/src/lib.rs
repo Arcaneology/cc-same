@@ -6,6 +6,7 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod assets;
+mod dock;
 pub mod hero;
 pub mod i18n;
 mod login;
@@ -55,12 +56,16 @@ pub fn run() {
     let ctx = context();
     update::finish(&ctx.paths);
     let app = gpui_kit::application().with_assets(assets::Assets).with_quit_mode(QuitMode::Explicit);
-    // Clicking the Dock icon brings the window back.
+    // Opening the app again, or clicking its Dock icon, brings the window back.
     app.on_reopen(show_window);
     app.run(move |cx: &mut App| {
+        // GPUI has just put the app in the Dock. Starting quietly in the tray, it leaves again before
+        // it shows there.
+        let config = ctx.config();
+        dock::show(config.dock || !(login::started_hidden() && config.tray));
         gpui_kit::init(cx);
         cx.set_app_identity(APP_ID, APP_NAME);
-        i18n::apply(&ctx.config().language);
+        i18n::apply(&config.language);
         theme::install(cx);
         let store = Store::init(ctx.clone(), cx);
         cx.on_action(|_: &Quit, cx| quit(cx));
@@ -83,6 +88,8 @@ pub fn run() {
                 return;
             }
             if Shell::has_tray(cx) {
+                // The Dock icon goes with the window, unless it is to stay.
+                dock::show(Store::global(cx).read(cx).config().dock);
                 // Nobody is looking: the moment for an update that is ready.
                 Store::global(cx).update(cx, |store, cx| store.install_when_idle(cx));
             } else {
@@ -112,6 +119,8 @@ pub fn show_window(cx: &mut App) {
     }
     let store = Store::global(cx);
     let options = window_options(cx);
+    // Into the Dock first, so the window comes up like any app's.
+    dock::show(true);
     match gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| view::UniApp::new(store.clone(), window, cx))) {
         Ok(_) => cx.activate(true),
         Err(e) => eprintln!("could not open the {APP_NAME} window: {e:#}"),

@@ -37,7 +37,8 @@ comes as a small desktop app and a command-line tool. Both share one engine.
 - **One switch.** *Sync in the background* keeps every account identical from login, even with the
   window closed.
 - **Menu bar / system tray.** The status, *Sync now* and the background switch are a click away.
-  Hide the icon in Settings, and choose whether the app opens quietly at login.
+  Hide the icon in Settings, and choose whether the app opens quietly at login. On macOS the app
+  is in the Dock only while its window is open, unless you set it to stay.
 - **Speaks your language.** English, 简体中文, 繁體中文, 日本語, 한국어, Français, Deutsch, Español,
   Português (Brasil) and Русский, following the system unless you pick one. Light and dark follow
   the system too.

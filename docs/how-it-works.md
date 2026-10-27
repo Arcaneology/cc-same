@@ -156,13 +156,16 @@ Linux) icon. The icon keeps running when the window is closed and shows the head
 and the background switch; it is a `tray-icon` status item on macOS and Windows and a
 StatusNotifierItem (`ksni`) on Linux. With the icon hidden, closing the window quits the app.
 *Open at login* registers the app to start with `--hidden`, so it comes up in the tray only.
+On macOS the app is an `LSUIElement`: it takes the regular activation policy (a Dock icon, a
+place in ⌘-Tab) while its window is open and goes back to accessory when the window closes,
+unless *Always show in the Dock* keeps it regular.
 
 The app never syncs by itself: it reads, and runs the engine when you press *Sync now*. The
 background switch installs the same agent as `cc-same install`.
 
 Its preferences live next to the sync settings in `<state>/config.json`: `appearance`
-(`system`, `light`, `dark`), `language` (`system` or a code such as `zh-CN`), `tray`,
-`checkUpdates` and `autoUpdate`.
+(`system`, `light`, `dark`), `language` (`system` or a code such as `zh-CN`), `tray`, `dock`
+(macOS), `checkUpdates` and `autoUpdate`.
 
 ### Updates
 

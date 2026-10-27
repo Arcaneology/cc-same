@@ -50,7 +50,7 @@ fn body(store: &Entity<Store>, cx: &mut App) -> impl IntoElement {
     let updates = this.updates.clone();
     let muted = cx.theme().muted_foreground;
 
-    let general = vec![
+    let mut general = vec![
         row(
             t("settings.theme"),
             None,
@@ -82,27 +82,31 @@ fn body(store: &Entity<Store>, cx: &mut App) -> impl IntoElement {
             toggle(store, "tray", cfg.tray, true, |c, on| c.tray = on),
             cx,
         ),
-        row(
-            t("settings.login"),
-            Some(t(if cfg!(target_os = "macos") {
-                "settings.login.detail.mac"
-            } else {
-                "settings.login.detail.other"
-            })),
-            Switch::new("open-at-login")
-                .small()
-                .checked(open_at_login)
-                .on_change({
-                    let store = store.clone();
-                    move |on: &bool, _, cx| {
-                        let on = *on;
-                        store.update(cx, |s, cx| s.set_open_at_login(on, cx));
-                    }
-                })
-                .into_any_element(),
-            cx,
-        ),
     ];
+    if cfg!(target_os = "macos") {
+        general.push(row(
+            t("settings.dock"),
+            Some(t("settings.dock.detail")),
+            toggle(store, "dock", cfg.dock, true, |c, on| c.dock = on),
+            cx,
+        ));
+    }
+    general.push(row(
+        t("settings.login"),
+        Some(t(if cfg!(target_os = "macos") { "settings.login.detail.mac" } else { "settings.login.detail.other" })),
+        Switch::new("open-at-login")
+            .small()
+            .checked(open_at_login)
+            .on_change({
+                let store = store.clone();
+                move |on: &bool, _, cx| {
+                    let on = *on;
+                    store.update(cx, |s, cx| s.set_open_at_login(on, cx));
+                }
+            })
+            .into_any_element(),
+        cx,
+    ));
 
     let sync = vec![
         row(

@@ -3,6 +3,15 @@
 What changed in each version of CC Same. The app shows these notes after it updates, and under
 Settings › Updates.
 
+## Unreleased
+
+### Changed
+
+- **macOS: the Dock icon goes with the window.** CC Same used to stay in the Dock for as long as
+  it ran, even when all you used was its menu bar icon. Now it's in the Dock while its window is
+  open and leaves when you close it, and at login it starts in the menu bar alone. To keep it in
+  the Dock, turn on **Always show in the Dock** in Settings.
+
 ## 0.1.11 - 2026-10-27
 
 ### Fixed
