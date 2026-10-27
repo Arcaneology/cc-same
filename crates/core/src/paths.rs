@@ -3,7 +3,7 @@
 //! | | Claude Desktop data | Desktop logs | cc-same state |
 //! |---|---|---|---|
 //! | macOS | `~/Library/Application Support/Claude` | `~/Library/Logs/Claude` | `~/Library/Application Support/cc-same` |
-//! | Windows | `%APPDATA%\Claude` (Store build: `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`) | `<data>\logs` | `%APPDATA%\cc-same` |
+//! | Windows | `%APPDATA%\Claude` (Store build: `%LOCALAPPDATA%\Claude-Data\<package>`, before Desktop 3 `%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Claude`) | `<data>\logs` | `%APPDATA%\cc-same` |
 //! | Linux | `~/.config/Claude` | `<data>/logs` | `~/.local/share/cc-same` |
 //!
 //! Every location can be overridden with an environment variable (`CC_SAME_USER_DATA`,
@@ -158,10 +158,17 @@ pub fn default_user_data() -> PathBuf {
     dirs::config_dir().unwrap_or_else(home).join("Claude")
 }
 
-/// The Microsoft Store (MSIX) build virtualises `%APPDATA%` into its package folder. Use
-/// whichever copy Desktop touched last.
 #[cfg(windows)]
 fn windows_user_data() -> Option<PathBuf> {
+    newest_windows_user_data(dirs::config_dir().as_deref(), dirs::data_local_dir().as_deref())
+}
+
+/// The installer's build keeps its data in `%APPDATA%\Claude`. A Microsoft Store (MSIX) build
+/// keeps it in `%LOCALAPPDATA%\Claude-Data\<package family>` since Desktop 3, which moves it
+/// there from the package's virtualised `%APPDATA%` and leaves only a marker behind. Use whichever
+/// copy Desktop touched last.
+#[cfg(any(windows, test))]
+fn newest_windows_user_data(roaming: Option<&Path>, local: Option<&Path>) -> Option<PathBuf> {
     use std::fs;
     use std::time::SystemTime;
 
@@ -174,19 +181,44 @@ fn windows_user_data() -> Option<PathBuf> {
             }
         }
     };
-    if let Some(roaming) = dirs::config_dir() {
+    if let Some(roaming) = roaming {
         consider(roaming.join("Claude"));
     }
-    if let Some(local) = dirs::data_local_dir() {
-        if let Ok(entries) = fs::read_dir(local.join("Packages")) {
-            for e in entries.flatten() {
-                if e.file_name().to_string_lossy().starts_with("Claude_") {
-                    consider(e.path().join("LocalCache").join("Roaming").join("Claude"));
-                }
+    if let Some(local) = local {
+        for e in fs::read_dir(local.join("Claude-Data")).into_iter().flatten().flatten() {
+            if is_package_family(&e.file_name().to_string_lossy()) {
+                consider(e.path());
+            }
+        }
+        for e in fs::read_dir(local.join("Packages")).into_iter().flatten().flatten() {
+            if is_claude_package(&e.file_name().to_string_lossy()) {
+                consider(e.path().join("LocalCache").join("Roaming").join("Claude"));
             }
         }
     }
     best.map(|(_, p)| p)
+}
+
+/// `<name>_<publisher hash>`, the way Desktop names its folders in `Claude-Data` (in lower case).
+/// A copy it has not finished (`~copying.<family>`) is not one.
+#[cfg(any(windows, test))]
+fn is_package_family(family: &str) -> bool {
+    family.split_once('_').is_some_and(|(name, publisher)| {
+        name.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+            && !publisher.is_empty()
+            && publisher.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
+}
+
+/// Claude Desktop's Store packages, `Claude_<hash>` and `AnthropicPBC.Claude_<hash>`, among
+/// every app's in `%LOCALAPPDATA%\Packages`.
+#[cfg(any(windows, test))]
+fn is_claude_package(family: &str) -> bool {
+    is_package_family(family)
+        && family
+            .split_once('_')
+            .is_some_and(|(name, _)| ["Claude", "AnthropicPBC.Claude"].iter().any(|n| name.eq_ignore_ascii_case(n)))
 }
 
 fn default_desktop_logs(user_data: &Path) -> PathBuf {
@@ -235,5 +267,62 @@ fn default_log_file(state_dir: &Path) -> PathBuf {
         home().join("Library").join("Logs").join("cc-same.log")
     } else {
         state_dir.join("cc-same.log")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    /// Every place a Windows build of Desktop has kept its data counts, and the one whose
+    /// `config.json` changed last wins. Another app's package and an unfinished copy never do.
+    #[test]
+    fn windows_data_is_found_wherever_desktop_keeps_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (roaming, local) = (tmp.path().join("Roaming"), tmp.path().join("Local"));
+        let package =
+            |family: &str| local.join("Packages").join(family).join("LocalCache").join("Roaming").join("Claude");
+        let touch = |dir: &Path, secs: u64| {
+            fs::create_dir_all(dir).unwrap();
+            let config = fs::File::create(dir.join("config.json")).unwrap();
+            config.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
+        };
+        touch(&package("Other_1a2b3c4d5e6f7"), 9_000);
+        touch(&local.join("Claude-Data").join("~copying.claude_pzs8sxrjxfjjc"), 9_000);
+        let places = [
+            roaming.join("Claude"),
+            package("Claude_pzs8sxrjxfjjc"),
+            package("AnthropicPBC.Claude_fnn82j28hfe8t"),
+            local.join("Claude-Data").join("claude_pzs8sxrjxfjjc"),
+            local.join("Claude-Data").join("anthropicpbc.claude_fnn82j28hfe8t"),
+        ];
+        for (i, dir) in places.iter().enumerate() {
+            touch(dir, 1_000 + i as u64);
+            assert_eq!(newest_windows_user_data(Some(&roaming), Some(&local)).as_ref(), Some(dir));
+        }
+        assert_eq!(newest_windows_user_data(None, None), None);
+    }
+
+    /// Desktop 3 moves a Store build's data out of its package and leaves a marker there. The
+    /// data is found in its new place, not in an older installer build's folder.
+    #[test]
+    fn windows_data_is_found_after_desktop_3_moves_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (roaming, local) = (tmp.path().join("Roaming"), tmp.path().join("Local"));
+        let old = local.join("Packages").join("Claude_pzs8sxrjxfjjc").join("LocalCache").join("Roaming").join("Claude");
+        let new = local.join("Claude-Data").join("claude_pzs8sxrjxfjjc");
+        for (dir, secs) in [(&roaming.join("Claude"), 1_000), (&old, 2_000)] {
+            fs::create_dir_all(dir).unwrap();
+            let config = fs::File::create(dir.join("config.json")).unwrap();
+            config.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
+        }
+        assert_eq!(newest_windows_user_data(Some(&roaming), Some(&local)), Some(old.clone()));
+        fs::create_dir_all(new.parent().unwrap()).unwrap();
+        fs::rename(&old, &new).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join(".user-data-left.claude_pzs8sxrjxfjjc"), "").unwrap();
+        assert_eq!(newest_windows_user_data(Some(&roaming), Some(&local)), Some(new));
     }
 }

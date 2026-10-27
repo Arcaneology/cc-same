@@ -12,6 +12,10 @@ Settings › Updates.
   to that process along with the session, so after a switch another account could pick it up
   and use the first account's plan. Each account now keeps its own; the conversation still
   carries over, and the other account starts a process of its own on the host.
+- **Windows: no sessions with Claude Desktop 3 from the Store.** Desktop 3 moves a Store build's
+  data to `%LOCALAPPDATA%\Claude-Data`, where CC Same didn't look, so it found no sessions and
+  stopped syncing. It looks there now, and in the older folder of either of Desktop's Store
+  packages.
 
 ## 0.1.10 - 2026-10-05
 

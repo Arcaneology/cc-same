@@ -15,8 +15,10 @@ sessions per **account and organization**:
 ```
 
 `<Claude data>` is `~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on
-Windows (the Store build virtualises it as `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`), and
-`~/.config/Claude` on Linux.
+Windows, and `~/.config/Claude` on Linux. A Store build of Desktop 3 or later keeps it in
+`%LOCALAPPDATA%\Claude-Data\<package family>` (it moves it there from
+`%LOCALAPPDATA%\Packages\<package family>\LocalCache\Roaming\Claude`, where older versions kept
+it); CC Same uses whichever of these Desktop wrote to last.
 
 An account gets a folder for every organization it is used in. Signing in to another account can
 leave an empty one behind as well: Desktop opens the new account with the organization it
