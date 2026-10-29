@@ -663,9 +663,10 @@ impl UniApp {
     }
 
     fn render_accounts(&self, accounts: &[Account], cx: &mut Context<Self>) -> AnyElement {
-        let (loading, switching) = {
+        let (loading, switching, settled) = {
             let store = self.store.read(cx);
-            (store.overview.is_none(), store.overview.as_ref().is_some_and(|o| o.logins.supported))
+            let switching = store.overview.as_ref().is_some_and(|o| o.logins.supported);
+            (store.overview.is_none(), switching, store.mood().settled())
         };
         let actions: Vec<Option<AnyElement>> = accounts.iter().map(|a| self.account_action(a, cx)).collect();
         let add = switching.then(|| {
@@ -687,6 +688,9 @@ impl UniApp {
                 .map(|(a, action)| {
                     let key: SharedString = a.id.clone().into();
                     let hovered = self.hovered.as_ref() == Some(&key);
+                    // In sync, the headline already counts every account's sessions: the plan is
+                    // all the row needs to say.
+                    let plan_leads = settled && a.missing == 0 && a.plan_known();
                     let hover_key = key.clone();
                     let row = h_flex()
                         .id(ElementId::Name(format!("account-{}", a.id).into()))
@@ -733,12 +737,14 @@ impl UniApp {
                                         .min_w_0()
                                         .text_size(rems(0.923))
                                         .text_color(if a.broken { theme.danger } else { theme.muted_foreground })
-                                        .child(div().when(!a.broken, |el| el.truncate()).child(a.detail()))
+                                        .when(!plan_leads, |el| {
+                                            el.child(div().when(!a.broken, |el| el.truncate()).child(a.detail()))
+                                        })
                                         .when_some(a.usage.filter(|_| !a.broken && !a.excluded), |el, usage| {
-                                            el.child(plan_use(&a.id, usage, cx))
+                                            el.child(plan_use(&a.id, usage, plan_leads, cx))
                                         })
                                         .when_some(a.weekly_reset.filter(|_| !a.broken && !a.excluded), |el, at| {
-                                            el.child(reset_left(&a.id, at))
+                                            el.child(reset_left(&a.id, at, plan_leads && a.usage.is_none()))
                                         }),
                                 ),
                         )
@@ -1107,10 +1113,11 @@ fn skeleton_row(i: usize, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// "· 7d 58%" after an account's sessions: the fuller window, tinted as the plan fills up, and
-/// "· 3 h ago" once Claude has not read it lately; both windows, and when Claude read them, on
-/// hover, with how to have Claude read the open account's again.
-fn plan_use(id: &str, usage: PlanUse, cx: &App) -> AnyElement {
+/// "· 7d 58%" after an account's sessions (or first on its line, without the dot): the fuller
+/// window, tinted as the plan fills up, and "· 3 h ago" once Claude has not read the open account
+/// lately; both windows, and when Claude read them, on hover, with how to have Claude read the
+/// open account's again.
+fn plan_use(id: &str, usage: PlanUse, first: bool, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let color = match usage.fullness() {
         Fullness::Roomy => theme.muted_foreground,
@@ -1127,9 +1134,10 @@ fn plan_use(id: &str, usage: PlanUse, cx: &App) -> AnyElement {
     h_flex()
         .id(ElementId::Name(format!("usage-{id}").into()))
         .flex_none()
-        .child(div().px_1().child("·"))
+        .when(!first, |el| el.child(div().px_1().child("·")))
         .child(div().text_color(color).child(usage.short()))
-        .when_some(usage.age(), |el, age| el.child(div().px_1().child("·")).child(age))
+        // An account nobody is using keeps what it had: how old the reading is waits in the tip.
+        .when_some(usage.age().filter(|_| usage.in_use), |el, age| el.child(div().px_1().child("·")).child(age))
         .tooltip(move |window, cx| {
             let tip = tip.clone();
             // A tooltip is laid out as narrow as its content allows, which for text is one line:
@@ -1143,15 +1151,15 @@ fn plan_use(id: &str, usage: PlanUse, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// "· ↻ 3d 4h" after the plan's use: how long until the weekly window renews, when it was given;
-/// the day and time it renews on, in this computer's time zone, on hover.
-fn reset_left(id: &str, anchor: i64) -> AnyElement {
+/// "· ↻ 3d 4h" after the plan's use (or first on its line): how long until the weekly window
+/// renews, when it was given; the day and time it renews on, in this computer's time zone, on hover.
+fn reset_left(id: &str, anchor: i64, first: bool) -> AnyElement {
     let now = cc_same_core::fsx::now_secs() as i64;
     let tip = model::reset_tip(anchor, now).unwrap_or_default();
     h_flex()
         .id(ElementId::Name(format!("reset-{id}").into()))
         .flex_none()
-        .child(div().px_1().child("·"))
+        .when(!first, |el| el.child(div().px_1().child("·")))
         .child(Icon::empty().path("icons/rotate-cw.svg").xsmall().mr_0p5())
         .child(model::reset_in(anchor, now))
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))

@@ -269,6 +269,11 @@ impl Account {
         parts.join(" · ")
     }
 
+    /// Something of its plan to show: what it used, or when its week renews.
+    pub fn plan_known(&self) -> bool {
+        !self.broken && !self.excluded && self.has_lists && (self.usage.is_some() || self.weekly_reset.is_some())
+    }
+
     pub fn ring(&self) -> Placement {
         if self.broken {
             Placement::Broken
