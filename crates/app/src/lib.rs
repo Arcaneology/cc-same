@@ -106,7 +106,7 @@ pub fn run() {
 }
 
 /// On macOS, with the menu bar icon showing, the window is a panel under the icon.
-fn uses_panel(cx: &App) -> bool {
+pub(crate) fn uses_panel(cx: &App) -> bool {
     cfg!(target_os = "macos") && Shell::has_tray(cx)
 }
 
