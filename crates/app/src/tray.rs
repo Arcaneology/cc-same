@@ -9,9 +9,11 @@ use gpui_kit::App;
 use std::rc::Rc;
 
 /// What a click in the tray asks for.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Open,
+    /// Open the panel under the icon, or close it (a left click on macOS).
+    Panel(Option<crate::panel::Anchor>),
     SyncNow,
     ToggleBackground,
     Settings,
@@ -162,6 +164,11 @@ impl Tray {
     pub fn update(&self, status: &Status) {
         self.0.update(status);
     }
+
+    /// Where the panel hangs from under the icon, when the system says where the icon is.
+    pub fn anchor(&self) -> Option<crate::panel::Anchor> {
+        self.0.anchor()
+    }
 }
 
 fn decode(png: &[u8]) -> anyhow::Result<(Vec<u8>, u32, u32)> {
@@ -194,6 +201,11 @@ mod platform {
     fn icon(attention: bool) -> anyhow::Result<Icon> {
         let (rgba, width, height) = decode(if attention { ATTENTION } else { NORMAL })?;
         Icon::from_rgba(rgba, width, height).context("tray icon")
+    }
+
+    fn anchor_of(rect: tray_icon::Rect) -> Option<crate::panel::Anchor> {
+        let (at, size) = (rect.position, rect.size);
+        crate::panel::below(at.x, at.y, size.width.into(), size.height.into())
     }
 
     pub struct Tray {
@@ -287,8 +299,8 @@ mod platform {
                 .with_icon(icon(status.attention)?)
                 .with_icon_as_template(cfg!(target_os = "macos"))
                 .with_menu(Box::new(menu.clone()))
-                // A menu bar item opens its menu on click; a Windows tray icon opens the app.
-                .with_menu_on_left_click(cfg!(target_os = "macos"))
+                // A click opens the app (on macOS, its panel under the icon); the menu is a right-click.
+                .with_menu_on_left_click(false)
                 .build()
                 .context("creating the tray icon")?;
 
@@ -315,14 +327,17 @@ mod platform {
                     while let Ok(event) = TrayIconEvent::receiver().try_recv() {
                         if let TrayIconEvent::Click {
                             id,
+                            rect,
                             button: MouseButton::Left,
                             button_state: MouseButtonState::Up,
                             ..
                         } = event
                             && id == tray_id
-                            && cfg!(target_os = "windows")
                         {
-                            asked.push(Command::Open);
+                            asked.push(match cfg!(target_os = "macos") {
+                                true => Command::Panel(anchor_of(rect)),
+                                false => Command::Open,
+                            });
                         }
                     }
                     for command in asked {
@@ -348,6 +363,10 @@ mod platform {
                 last: RefCell::new(status.clone()),
                 _events: events,
             })
+        }
+
+        pub fn anchor(&self) -> Option<crate::panel::Anchor> {
+            self.icon.rect().and_then(anchor_of)
         }
 
         pub fn update(&self, status: &Status) {
@@ -553,6 +572,10 @@ mod platform {
             Ok(Tray { handle, _events: events })
         }
 
+        pub fn anchor(&self) -> Option<crate::panel::Anchor> {
+            None
+        }
+
         pub fn update(&self, status: &Status) {
             let status = status.clone();
             self.handle.update(move |item| {
@@ -583,6 +606,10 @@ mod platform {
         }
 
         pub fn update(&self, _: &Status) {}
+
+        pub fn anchor(&self) -> Option<crate::panel::Anchor> {
+            None
+        }
     }
 }
 

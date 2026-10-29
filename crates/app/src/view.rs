@@ -133,18 +133,13 @@ impl UniApp {
             (store.busy, store.switching_to.clone(), store.signing_in.is_some())
         };
         let theme = cx.theme();
-        let tag = |label: String, dot_color: Option<Hsla>| {
-            Tag::secondary()
-                .small()
-                .rounded_full()
-                .child(h_flex().gap_1p5().children(dot_color.map(dot)).child(label))
-                .into_any_element()
-        };
+        // The account in use: green while Claude runs on it, grey while Claude is closed.
+        let current = |tag: Tag| tag.small().rounded_full().child(t("account.current")).into_any_element();
         if a.open {
-            return Some(tag(t("account.open"), Some(theme.primary)));
+            return Some(current(Tag::success()));
         }
         if a.login == Login::SignedIn {
-            return Some(tag(t("account.signed_in"), None));
+            return Some(current(Tag::secondary()));
         }
         if switching_to.as_deref() == Some(a.id.as_str()) {
             let muted = theme.muted_foreground;
@@ -744,7 +739,12 @@ impl UniApp {
                                             el.child(plan_use(&a.id, usage, plan_leads, cx))
                                         })
                                         .when_some(a.weekly_reset.filter(|_| !a.broken && !a.excluded), |el, at| {
-                                            el.child(reset_left(&a.id, at, plan_leads && a.usage.is_none()))
+                                            let after = match (a.usage.is_some(), plan_leads) {
+                                                (true, _) => After::Usage,
+                                                (false, false) => After::Sessions,
+                                                (false, true) => After::Nothing,
+                                            };
+                                            el.child(reset_left(&a.id, at, after, cx))
                                         }),
                                 ),
                         )
@@ -1113,9 +1113,9 @@ fn skeleton_row(i: usize, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// "· 7d 58%" after an account's sessions (or first on its line, without the dot): the fuller
-/// window, tinted as the plan fills up, and "· 3 h ago" once Claude has not read the open account
-/// lately; both windows, and when Claude read them, on hover, with how to have Claude read the
+/// "· 84% used (2 h ago)" after an account's sessions (or first on its line, without the dot): the
+/// fuller window, tinted as the plan fills up, and how old the reading is once Claude has not read
+/// it lately; both windows, and when Claude read them, on hover, with how to have Claude read the
 /// open account's again.
 fn plan_use(id: &str, usage: PlanUse, first: bool, cx: &App) -> AnyElement {
     let theme = cx.theme();
@@ -1135,9 +1135,7 @@ fn plan_use(id: &str, usage: PlanUse, first: bool, cx: &App) -> AnyElement {
         .id(ElementId::Name(format!("usage-{id}").into()))
         .flex_none()
         .when(!first, |el| el.child(div().px_1().child("·")))
-        .child(div().text_color(color).child(usage.short()))
-        // An account nobody is using keeps what it had: how old the reading is waits in the tip.
-        .when_some(usage.age().filter(|_| usage.in_use), |el, age| el.child(div().px_1().child("·")).child(age))
+        .child(div().text_color(color).child(usage.used()))
         .tooltip(move |window, cx| {
             let tip = tip.clone();
             // A tooltip is laid out as narrow as its content allows, which for text is one line:
@@ -1151,16 +1149,28 @@ fn plan_use(id: &str, usage: PlanUse, first: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// "· ↻ 3d 4h" after the plan's use (or first on its line): how long until the weekly window
-/// renews, when it was given; the day and time it renews on, in this computer's time zone, on hover.
-fn reset_left(id: &str, anchor: i64, first: bool) -> AnyElement {
+/// What comes before the time left to the weekly reset on an account's line.
+#[derive(Clone, Copy, PartialEq)]
+enum After {
+    /// The plan's use: a bar sets them apart.
+    Usage,
+    /// The sessions: a dot, as between the others.
+    Sessions,
+    /// Nothing: it starts the line.
+    Nothing,
+}
+
+/// "｜ resets in 2d 3h" after the plan's use: how long until the weekly window renews, when it was
+/// given; the day and time it renews on, in this computer's time zone, on hover.
+fn reset_left(id: &str, anchor: i64, after: After, cx: &App) -> AnyElement {
     let now = cc_same_core::fsx::now_secs() as i64;
     let tip = model::reset_tip(anchor, now).unwrap_or_default();
+    let bar = cx.theme().muted_foreground.opacity(0.45);
     h_flex()
         .id(ElementId::Name(format!("reset-{id}").into()))
         .flex_none()
-        .when(!first, |el| el.child(div().px_1().child("·")))
-        .child(Icon::empty().path("icons/rotate-cw.svg").xsmall().mr_0p5())
+        .when(after == After::Usage, |el| el.child(div().mx_2().w(px(1.)).h(rems(0.8)).bg(bar)))
+        .when(after == After::Sessions, |el| el.child(div().px_1().child("·")))
         .child(model::reset_in(anchor, now))
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .into_any_element()

@@ -204,6 +204,18 @@ impl PlanUse {
         parts.join(" · ")
     }
 
+    /// The fuller window as used, and how old the reading is once it is old: `84% used (2 h ago)`.
+    pub fn used(&self) -> String {
+        let percent = match (self.five_hour, self.weekly) {
+            (Some(h), Some(w)) => h.max(w),
+            (h, w) => h.or(w).unwrap_or(0),
+        };
+        match self.age() {
+            Some(ago) => tf("usage.used_ago", &[("percent", &percent), ("ago", &ago)]),
+            None => tf("usage.used", &[("percent", &percent)]),
+        }
+    }
+
     /// The fuller window only, `7d 58%`: the one that would stop Claude first.
     pub fn short(&self) -> String {
         match (self.five_hour, self.weekly) {
@@ -384,7 +396,7 @@ pub fn name_problem(text: &str, others: &[(String, String)]) -> Option<String> {
     }
 }
 
-/// "3d 4h": how long until the weekly window that renews at `anchor` renews, to the hour.
+/// "resets in 3d 4h": how long until the weekly window that renews at `anchor` renews, to the hour.
 pub fn reset_in(anchor: i64, now: i64) -> String {
     let hours = (cc_same_core::usage::next_weekly_reset(anchor, now) - now) / 3600;
     match hours {
@@ -689,10 +701,7 @@ mod tests {
         let anchor = reset_from(Some(4), "6:00", now).unwrap().unwrap();
         // Read back on this computer as it was given.
         assert_eq!(reset_local(anchor, now), Some((4, "06:00".into())));
-        assert_eq!(
-            reset_tip(anchor, now).as_deref(),
-            Some("Time left until the weekly limit resets, every Fri at 06:00")
-        );
+        assert_eq!(reset_tip(anchor, now).as_deref(), Some("The weekly limit resets every Fri at 06:00"));
     }
 
     #[test]
@@ -700,13 +709,28 @@ mod tests {
         let _locale = crate::i18n::TEST_LOCALE.lock().unwrap_or_else(|e| e.into_inner());
         rust_i18n::set_locale("en");
         let now = 1_000_000;
-        assert_eq!(reset_in(now + 3 * 86_400 + 4 * 3600 + 59 * 60, now), "3d 4h");
-        assert_eq!(reset_in(now + 5 * 3600 + 10, now), "5h");
-        assert_eq!(reset_in(now + 59 * 60, now), "<1h");
+        assert_eq!(reset_in(now + 3 * 86_400 + 4 * 3600 + 59 * 60, now), "resets in 3d 4h");
+        assert_eq!(reset_in(now + 5 * 3600 + 10, now), "resets in 5h");
+        assert_eq!(reset_in(now + 59 * 60, now), "resets within the hour");
         // Weeks on, it is the next renewal that counts.
-        assert_eq!(reset_in(now - 14 * 86_400 + 3600, now), "1h");
+        assert_eq!(reset_in(now - 14 * 86_400 + 3600, now), "resets in 1h");
         rust_i18n::set_locale("zh-CN");
-        assert_eq!(reset_in(now + 2 * 86_400 + 3600, now), "2 天 1 小时");
+        assert_eq!(reset_in(now + 2 * 86_400 + 3600, now), "2天1小时后重置");
+    }
+
+    #[test]
+    fn the_plan_reads_as_the_share_used_and_how_old_that_is() {
+        let _locale = crate::i18n::TEST_LOCALE.lock().unwrap_or_else(|e| e.into_inner());
+        rust_i18n::set_locale("en");
+        let now = cc_same_core::fsx::now_secs();
+        let read = |age: f64, h, w| cc_same_core::usage::Usage { at: now - age, five_hour: h, weekly: w };
+        let fresh = PlanUse::of(&read(60.0, Some(12.0), Some(84.0)), now, true, None).unwrap();
+        assert_eq!(fresh.used(), "84% used");
+        // The fuller window is the one that stops Claude first.
+        let old = PlanUse::of(&read(2.0 * 3600.0, Some(97.0), Some(40.0)), now, false, None).unwrap();
+        assert_eq!(old.used(), "97% used (2 h ago)");
+        rust_i18n::set_locale("zh-CN");
+        assert_eq!(old.used(), "97%已用（2 小时前）");
     }
 
     #[test]
