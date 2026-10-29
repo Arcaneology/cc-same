@@ -133,10 +133,11 @@ impl UniApp {
             (store.busy, store.switching_to.clone(), store.signing_in.is_some())
         };
         let theme = cx.theme();
-        // The account in use: green while Claude runs on it, grey while Claude is closed.
+        // The account in use: in the accent color, like the window's buttons, while Claude runs on
+        // it; grey while Claude is closed.
         let current = |tag: Tag| tag.small().rounded_full().child(t("account.current")).into_any_element();
         if a.open {
-            return Some(current(Tag::success()));
+            return Some(current(Tag::primary()));
         }
         if a.login == Login::SignedIn {
             return Some(current(Tag::secondary()));
