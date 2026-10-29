@@ -204,15 +204,25 @@ impl PlanUse {
         parts.join(" · ")
     }
 
-    /// The fuller window as used, and how old the reading is once it is old: `84% used (2 h ago)`.
+    /// The week as used, and how old the reading is once it is old: `84% used (2 h ago)`. Without
+    /// a reading of the week, the 5-hour window, named: `5h 12% (2 h ago)`.
     pub fn used(&self) -> String {
-        let percent = match (self.five_hour, self.weekly) {
-            (Some(h), Some(w)) => h.max(w),
-            (h, w) => h.or(w).unwrap_or(0),
+        let used = match (self.weekly, self.five_hour) {
+            (Some(w), _) => tf("usage.used", &[("percent", &w)]),
+            (None, h) => tf("usage.five_hour", &[("percent", &h.unwrap_or(0))]),
         };
         match self.age() {
-            Some(ago) => tf("usage.used_ago", &[("percent", &percent), ("ago", &ago)]),
-            None => tf("usage.used", &[("percent", &percent)]),
+            Some(ago) => tf("usage.dated", &[("usage", &used), ("ago", &ago)]),
+            None => used,
+        }
+    }
+
+    /// How full the window [`PlanUse::used`] shows is.
+    pub fn used_fullness(&self) -> Fullness {
+        match self.weekly.or(self.five_hour).unwrap_or(0) {
+            100.. => Fullness::Full,
+            80.. => Fullness::Nearly,
+            _ => Fullness::Roomy,
         }
     }
 
@@ -726,11 +736,14 @@ mod tests {
         let read = |age: f64, h, w| cc_same_core::usage::Usage { at: now - age, five_hour: h, weekly: w };
         let fresh = PlanUse::of(&read(60.0, Some(12.0), Some(84.0)), now, true, None).unwrap();
         assert_eq!(fresh.used(), "84% used");
-        // The fuller window is the one that stops Claude first.
+        // It is the week, even with the 5-hour window fuller, and tinted by the week.
         let old = PlanUse::of(&read(2.0 * 3600.0, Some(97.0), Some(40.0)), now, false, None).unwrap();
-        assert_eq!(old.used(), "97% used (2 h ago)");
+        assert_eq!((old.used().as_str(), old.used_fullness()), ("40% used (2 h ago)", Fullness::Roomy));
+        // Without a reading of the week, the 5-hour window says which it is.
+        let hours = PlanUse::of(&read(60.0, Some(30.0), None), now, true, None).unwrap();
+        assert_eq!(hours.used(), "5h 30%");
         rust_i18n::set_locale("zh-CN");
-        assert_eq!(old.used(), "97%已用（2 小时前）");
+        assert_eq!(old.used(), "40%已用（2 小时前）");
     }
 
     #[test]

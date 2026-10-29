@@ -1115,12 +1115,12 @@ fn skeleton_row(i: usize, cx: &App) -> AnyElement {
 }
 
 /// "· 84% used (2 h ago)" after an account's sessions (or first on its line, without the dot): the
-/// fuller window, tinted as the plan fills up, and how old the reading is once Claude has not read
+/// week, tinted as it fills up, and how old the reading is once Claude has not read
 /// it lately; both windows, and when Claude read them, on hover, with how to have Claude read the
 /// open account's again.
 fn plan_use(id: &str, usage: PlanUse, first: bool, cx: &App) -> AnyElement {
     let theme = cx.theme();
-    let color = match usage.fullness() {
+    let color = match usage.used_fullness() {
         Fullness::Roomy => theme.muted_foreground,
         Fullness::Nearly => theme.warning,
         Fullness::Full => theme.danger,
