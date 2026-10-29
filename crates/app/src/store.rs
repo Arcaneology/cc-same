@@ -779,6 +779,23 @@ impl Store {
         .detach();
     }
 
+    /// Note when an account's weekly window renews (a moment it renews, in Unix seconds), or forget
+    /// it. Like the name, it only edits the list.
+    pub fn set_weekly_reset(&mut self, account: String, at: Option<i64>, cx: &mut Context<Self>) {
+        let ctx = self.ctx.clone();
+        cx.spawn(async move |this, cx| {
+            let result =
+                cx.background_executor().spawn(async move { accounts::set_weekly_reset(&ctx, &account, at) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if let Err(e) = result {
+                    cx.emit(StoreEvent::Done(Err(format!("{e:#}"))));
+                }
+                this.refresh(cx);
+            });
+        })
+        .detach();
+    }
+
     /// An account's name as the window shows it.
     pub fn account_name(&self, id: &str) -> String {
         if let Some(account) = self.accounts().into_iter().find(|a| a.id == id) {

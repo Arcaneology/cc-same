@@ -293,9 +293,11 @@ impl UniApp {
         });
     }
 
-    /// Ask for the name an account goes by in the list (its alias). Empty takes the name away.
+    /// Ask for the name an account goes by in the list (its alias), and when its weekly window
+    /// renews. Empty takes either away.
     pub fn open_name(&mut self, account: String, window: &mut Window, cx: &mut Context<Self>) {
-        let (title, current, others) = {
+        let now = cc_same_core::fsx::now_secs() as i64;
+        let (title, current, others, reset) = {
             let rows = self.store.read(cx).accounts();
             let Some(row) = rows.iter().find(|a| a.id == account) else { return };
             // An account as people know it apart from its name: its email, else its ID.
@@ -304,8 +306,31 @@ impl UniApp {
             };
             let others: Vec<(String, String)> =
                 rows.iter().filter(|a| a.id != account).filter_map(|a| Some((a.alias.clone()?, known_as(a)))).collect();
-            (tf("name.title", &[("account", &known_as(row))]), row.alias.clone(), Rc::new(others))
+            let title = tf("name.title", &[("account", &known_as(row))]);
+            (title, row.alias.clone(), Rc::new(others), row.weekly_reset)
         };
+        // The renewal as this computer's clock reads it now.
+        let shown = reset.and_then(|anchor| model::reset_local(anchor, now));
+        let day = cx.new(|_| shown.as_ref().map(|(day, _)| *day));
+        let clock = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t("reset.placeholder"))
+                .default_value(shown.map(|(_, time)| time).unwrap_or_default())
+        });
+        let reset_problem = cx.new(|_| None::<String>);
+        cx.subscribe(&clock, {
+            let problem = reset_problem.clone();
+            move |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    problem.update(cx, |problem, cx| {
+                        if problem.take().is_some() {
+                            cx.notify();
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
         let input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t("name.placeholder")).default_value(current.unwrap_or_default())
         });
@@ -327,6 +352,37 @@ impl UniApp {
         let (store, field) = (self.store.clone(), input.clone());
         window.open_alert_dialog(cx, move |alert, _, cx| {
             let theme = cx.theme();
+            let picked = *day.read(cx);
+            // The day picked stands out in the accent color; the others stay quiet.
+            let days = h_flex().gap_1().children((0..7).map(|i| {
+                let (day, problem) = (day.clone(), reset_problem.clone());
+                let button = Button::new(SharedString::from(format!("reset-day-{i}")))
+                    .xsmall()
+                    .label(model::weekday_name(i))
+                    .on_click(move |_, window, cx| {
+                        day.update(cx, |day, cx| {
+                            *day = Some(i);
+                            cx.notify();
+                        });
+                        problem.update(cx, |problem, _| *problem = None);
+                        window.refresh();
+                    });
+                match picked == Some(i) {
+                    true => button.primary(),
+                    false => button.outline(),
+                }
+            }));
+            let reset_note = match reset_problem.read(cx) {
+                Some(problem) => div().text_color(theme.danger).child(problem.clone()),
+                None => div().text_color(theme.muted_foreground).child(t("reset.hint")),
+            };
+            let reset_fields = v_flex()
+                .pt_2()
+                .gap_2()
+                .child(div().font_weight(FontWeight::MEDIUM).child(t("reset.label")))
+                .child(days)
+                .child(Input::new(&clock).cleanable(true).py_1())
+                .child(reset_note.text_size(rems(0.846)).line_height(rems(1.2)));
             let note = match problem.read(cx) {
                 Some(problem) => div().text_color(theme.danger).child(problem.clone()),
                 None => div()
@@ -340,9 +396,11 @@ impl UniApp {
                 .gap_2()
                 // Its default 8 px padding leaves a 20 px line 16 px and cuts off descenders.
                 .child(Input::new(&field).cleanable(true).py_1())
-                .child(note.text_size(rems(0.846)).line_height(rems(1.2)));
+                .child(note.text_size(rems(0.846)).line_height(rems(1.2)))
+                .child(reset_fields);
             let (input, problem, store, account, others) =
                 (field.clone(), problem.clone(), store.clone(), account.clone(), others.clone());
+            let (day, clock, reset_problem) = (day.clone(), clock.clone(), reset_problem.clone());
             alert
                 .title(title.clone())
                 .description(t("name.body"))
@@ -360,9 +418,29 @@ impl UniApp {
                         window.refresh();
                         return false;
                     }
+                    let renews = model::reset_from(*day.read(cx), &clock.read(cx).value(), now);
+                    let renews = match renews {
+                        Ok(renews) => renews,
+                        Err(found) => {
+                            reset_problem.update(cx, |problem, cx| {
+                                *problem = Some(found);
+                                cx.notify();
+                            });
+                            window.refresh();
+                            return false;
+                        }
+                    };
                     let name = Some(text.trim().to_string()).filter(|name| !name.is_empty());
                     let account = account.clone();
-                    store.update(cx, |store, cx| store.set_alias(account, name, cx));
+                    store.update(cx, |store, cx| store.set_alias(account.clone(), name, cx));
+                    // The same renewal given again keeps the moment noted before.
+                    let same = |a: Option<i64>, b: Option<i64>| {
+                        let next = |at: Option<i64>| at.map(|at| cc_same_core::usage::next_weekly_reset(at, now));
+                        next(a) == next(b)
+                    };
+                    if !same(reset, renews) {
+                        store.update(cx, |store, cx| store.set_weekly_reset(account, renews, cx));
+                    }
                     true
                 })
         });
@@ -658,6 +736,9 @@ impl UniApp {
                                         .child(div().when(!a.broken, |el| el.truncate()).child(a.detail()))
                                         .when_some(a.usage.filter(|_| !a.broken && !a.excluded), |el, usage| {
                                             el.child(plan_use(&a.id, usage, cx))
+                                        })
+                                        .when_some(a.weekly_reset.filter(|_| !a.broken && !a.excluded), |el, at| {
+                                            el.child(reset_left(&a.id, at))
                                         }),
                                 ),
                         )
@@ -1059,6 +1140,21 @@ fn plan_use(id: &str, usage: PlanUse, cx: &App) -> AnyElement {
             }
             .build(window, cx)
         })
+        .into_any_element()
+}
+
+/// "· ↻ 3d 4h" after the plan's use: how long until the weekly window renews, when it was given;
+/// the day and time it renews on, in this computer's time zone, on hover.
+fn reset_left(id: &str, anchor: i64) -> AnyElement {
+    let now = cc_same_core::fsx::now_secs() as i64;
+    let tip = model::reset_tip(anchor, now).unwrap_or_default();
+    h_flex()
+        .id(ElementId::Name(format!("reset-{id}").into()))
+        .flex_none()
+        .child(div().px_1().child("·"))
+        .child(Icon::empty().path("icons/rotate-cw.svg").xsmall().mr_0p5())
+        .child(model::reset_in(anchor, now))
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .into_any_element()
 }
 

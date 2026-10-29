@@ -586,6 +586,7 @@ mod tests {
             alias: None,
             sits_out: false,
             usage: None,
+            weekly_reset: None,
             has_lists: true,
         }
     }
@@ -600,7 +601,7 @@ mod tests {
                 five_hour: Some(30.0),
                 weekly: Some(weekly),
             };
-            crate::model::PlanUse::of(&usage, cc_same_core::fsx::now_secs(), false)
+            crate::model::PlanUse::of(&usage, cc_same_core::fsx::now_secs(), false, None)
         };
         let mut ada = row("a", "ada@example.com", Some(1));
         ada.usage = use_of(40.0, 2.5 * 86_400.0);
